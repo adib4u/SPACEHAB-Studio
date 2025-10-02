@@ -1,6 +1,5 @@
 --[[
 	Script: HabitatPlacementServer
-	Author: Gemini
 	Description: 
 	Handles all server-side logic for placing habitat modules and interior items.
 	This script is the single source of truth for zone volumes, validating every 
@@ -12,7 +11,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 --// MODULES
--- These modules contain the core data for items and placement zones.
 local ItemData = require(ReplicatedStorage:WaitForChild("Configs").ItemData)
 local ZoneData = require(ReplicatedStorage:WaitForChild("Configs").ZoneData)
 
@@ -23,11 +21,7 @@ local placeModuleEvent = ReplicatedStorage:WaitForChild("PlaceHabitatModule")
 local placeItemEvent = ReplicatedStorage:WaitForChild("PlaceInteriorItem")
 
 --// SERVER STATE
--- This table tracks the current total volume of all items placed in each zone.
--- It is the authoritative state that prevents players from exceeding volume limits.
 local zoneVolumes = {}
-
--- Initialize the volume tracker for every zone defined in ZoneData.
 for zoneName, _ in pairs(ZoneData.Properties) do
 	zoneVolumes[zoneName] = 0
 end
@@ -65,48 +59,29 @@ end
 
 --============================================================================--
 --// FUNCTION: onPlaceItem
---// Handles the placement and validation of interior items.
+--// Handles placement, validation, and creation of the PERMANENT BillboardGui.
 --============================================================================--
 local function onPlaceItem(player, modelName, cframe, finalSize, targetZoneName)
-	-- Step 1: Validate all incoming data from the client
+	-- Step 1: Validation Checks
 	local templateModel = interiorItems:FindFirstChild(modelName)
 	local itemInfo = ItemData.Get(modelName)
 	local zoneInfo = ZoneData.Get(targetZoneName)
 
-	if not (templateModel and itemInfo and zoneInfo) then
-		warn(player.Name .. " sent invalid placement data (Item, ItemInfo, or ZoneInfo not found).")
-		return
-	end
+	if not (templateModel and itemInfo and zoneInfo) then return end
+	if itemInfo.Category ~= zoneInfo.Category then return end
 
-	-- Security Check: Ensure the item category matches the zone category
-	if itemInfo.Category ~= zoneInfo.Category then
-		warn(player.Name .. " tried to place item in a mismatched category zone.")
-		return
-	end
-
-	-- Step 2: Calculate the final volume based on client-provided size
 	local primaryPartTemplate = templateModel.PrimaryPart
-	if not primaryPartTemplate then
-		warn("Item '".. modelName .."' is missing a PrimaryPart and cannot be placed.")
-		return
-	end
+	if not primaryPartTemplate then return end
 	
+	-- Step 2: Calculate final volume and validate against server state
 	local originalSize = primaryPartTemplate.Size
 	local finalVolume = itemInfo.BaseVolume
-	
-	-- Only apply scaling if the data is valid
 	if finalSize and typeof(finalSize) == "Vector3" and originalSize.Magnitude > 0 then
 		local scaleVector = finalSize / originalSize
-		-- The volume scales cubically with the linear scale factor
 		finalVolume = itemInfo.BaseVolume * scaleVector.X * scaleVector.Y * scaleVector.Z
 	end
 
-	-- Security Check: Validate against server-side volume state
-	-- Use a small tolerance (0.01) to account for floating point inaccuracies.
-	if zoneVolumes[targetZoneName] + finalVolume > zoneInfo.MaxVolume + 0.01 then
-		warn(player.Name .. " exceeded volume limit for zone '" .. targetZoneName .. "'. Placement rejected.")
-		return
-	end
+	if zoneVolumes[targetZoneName] + finalVolume > zoneInfo.MaxVolume + 0.01 then return end
 
 	-- Step 3: All checks passed. Update server state and create the item.
 	zoneVolumes[targetZoneName] = zoneVolumes[targetZoneName] + finalVolume
@@ -114,17 +89,15 @@ local function onPlaceItem(player, modelName, cframe, finalSize, targetZoneName)
 	
 	local newItem = templateModel:Clone()
 	
-	-- Apply the final size to all parts of the new item model
+	-- Apply final size
 	if finalSize and originalSize.Magnitude > 0 then
 		local scale = finalSize / originalSize
 		for _, part in ipairs(newItem:GetDescendants()) do
-			if part:IsA("BasePart") then
-				part.Size = part.Size * scale
-			end
+			if part:IsA("BasePart") then part.Size = part.Size * scale end
 		end
 	end
 	
-	-- Finalize the properties of all parts
+	-- Finalize properties
 	for _, part in ipairs(newItem:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.Transparency = 0
@@ -135,6 +108,39 @@ local function onPlaceItem(player, modelName, cframe, finalSize, targetZoneName)
 	
 	newItem:SetPrimaryPartCFrame(cframe) 
 	newItem.Parent = workspace
+
+	--========================================================================--
+	--// THIS IS THE PERMANENT BILLBOARD GUI LOGIC (SERVER-SIDE)
+	--// This code creates the volume display on the final, placed item for all players to see.
+	--========================================================================--
+	if itemInfo.BaseVolume > 0 then
+		local primaryPart = newItem.PrimaryPart
+		if primaryPart then
+			local billboardGui = Instance.new("BillboardGui")
+			billboardGui.Name = "VolumeDisplay"
+			billboardGui.Adornee = primaryPart
+			billboardGui.Size = UDim2.new(6, 0, 1.5, 0)
+			billboardGui.StudsOffset = Vector3.new(0, 3, 0) -- Position it above the part
+			billboardGui.AlwaysOnTop = true
+
+			local textLabel = Instance.new("TextLabel")
+			textLabel.Size = UDim2.new(1, 0, 1, 0)
+			textLabel.BackgroundTransparency = 1
+			textLabel.TextColor3 = Color3.new(1, 1, 1)
+			textLabel.TextScaled = true
+			textLabel.Font = Enum.Font.SourceSansBold
+			textLabel.TextStrokeTransparency = 0.2
+			textLabel.TextStrokeColor3 = Color3.new(0,0,0)
+			
+			-- Display the final calculated volume
+			textLabel.Text = string.format("Volume: %.2f m³", finalVolume)
+
+			textLabel.Parent = billboardGui
+			billboardGui.Parent = primaryPart
+		end
+	end
+	--// END OF BILLBOARD GUI LOGIC
+	--========================================================================--
 end
 
 
