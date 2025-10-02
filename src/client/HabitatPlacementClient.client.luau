@@ -1,124 +1,183 @@
 --[[
 	LocalScript: HabitatPlacementClient
-	Handles ghost model placement, snapping, and now volume controls.
+	Author: Gemini
+	Description: 
+	Handles all client-side logic for the habitat placement system. This includes:
+	- Creating and controlling a "ghost" model for placement.
+	- Visualizing valid placement zones based on item category.
+	- Handling all player inputs (mouse movement, clicks, rotation, scaling).
+	- Providing real-time on-screen validation feedback (e.g., "NASA Compliant!").
+	- Communicating final placement data to the server for authorization.
 	
-	--// NEW CONTROLS
-	- Press [V] while placing an item to toggle Volume Scaling mode.
-	- When Scaling is ON, press [=] to increase volume and [-] to decrease volume.
-	- Press [R] to rotate.
+	--// PLAYER CONTROLS
+	- Left Click: Place item/module.
+	- Right Click: Cancel placement.
+	- R Key: Rotate item.
+	- V Key: Toggle volume scaling mode for items.
+	- = Key: Increase volume (when scaling is enabled).
+	- - Key: Decrease volume (when scaling isenabled).
 ]]
 
 --// SERVICES
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
 
---// Dependencies
-local GuiController = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiController"))
-local NHVData = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("NHVData"))
+--// MODULES
+local ItemData = require(ReplicatedStorage:WaitForChild("Configs").ItemData)
+local ZoneData = require(ReplicatedStorage:WaitForChild("Configs").ZoneData)
 
---// ASSETS
+--// ASSETS & EVENTS
 local habitatModules = ReplicatedStorage:WaitForChild("HabitatModules")
 local interiorItems = ReplicatedStorage:WaitForChild("InteriorItems")
 local placeModuleEvent = ReplicatedStorage:WaitForChild("PlaceHabitatModule")
 local placeItemEvent = ReplicatedStorage:WaitForChild("PlaceInteriorItem")
 
---// UI ELEMENTS
-local Gui = GuiController.Guis.HUDGui
-local mainFrame = Gui:WaitForChild("Left").Holder
-local cylinderButton = mainFrame:WaitForChild("Cylinder")
-local domeButton = mainFrame:WaitForChild("Dome")
-local interiorItemsFrame = mainFrame:WaitForChild("ScrollingFrame")
+--// WORKSPACE REFERENCES
+local PLACEMENT_ZONES_FOLDER = workspace:WaitForChild("PlacementZones")
 
---// VARIABLES
+--// UI SETUP
+-- Creates the validation GUI programmatically to keep the script self-contained.
+local validationGui = Instance.new("ScreenGui")
+validationGui.Name = "ValidationGui"
+validationGui.ResetOnSpawn = false
+local validationLabel = Instance.new("TextLabel")
+validationLabel.Name = "ValidationLabel"
+validationLabel.Size = UDim2.new(0, 450, 0, 50)
+validationLabel.AnchorPoint = Vector2.new(0.5, 1)
+validationLabel.Position = UDim2.new(0.5, 0, 0.95, 0)
+validationLabel.BackgroundTransparency = 0.4
+validationLabel.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+validationLabel.TextColor3 = Color3.new(1, 1, 1)
+validationLabel.Font = Enum.Font.SourceSansBold
+validationLabel.TextScaled = true
+validationLabel.TextStrokeTransparency = 0
+validationLabel.Visible = false
+validationLabel.Parent = validationGui
+validationGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+--// CLIENT-SIDE STATE
 local currentGhostModel = nil
 local isPlacing = false
-local placementMode = "Module"
+local currentItemInfo = nil
 local currentRotation = CFrame.new()
 
---// NEW: Volume control variables
+-- Volume control state
 local isVolumeChangingEnabled = false
-local originalPartSizes = {} -- Dictionary to store original sizes of all parts
-local baseVolume = 0
+local originalPartSizes = {}
 local currentScale = 1
 local VOLUME_CHANGE_STEP = 0.05
 local MIN_SCALE = 0.1
 
---// FORWARD DECLARATIONS
-local function updateGhostVolume() end
+-- Zone state
+local zoneParts = {}
+local clientZoneVolumes = {} -- Client's copy of zone volumes for instant feedback
+for zoneName, _ in pairs(ZoneData.Properties) do
+	clientZoneVolumes[zoneName] = 0
+	zoneParts[zoneName] = PLACEMENT_ZONES_FOLDER:FindFirstChild(zoneName)
+end
 
---// FUNCTIONS
 
-local function createGhostModel(name, mode)
-	if currentGhostModel then
-		currentGhostModel:Destroy()
+--============================================================================--
+--// HELPER FUNCTIONS
+--============================================================================--
+
+-- Shows a validation message on the player's screen.
+local function showValidationMessage(message, isSuccess)
+	validationLabel.Text = message
+	validationLabel.TextColor3 = isSuccess and Color3.fromRGB(85, 255, 127) or Color3.fromRGB(255, 85, 85)
+	validationLabel.Visible = true
+end
+
+-- Hides the validation message.
+local function hideValidationMessage()
+	validationLabel.Visible = false
+end
+
+-- Shows or hides the placement zones for a specific item category.
+local function setZoneVisibility(itemCategory, visible)
+	for zoneName, zonePart in pairs(zoneParts) do
+		if zonePart then
+			local zoneInfo = ZoneData.Get(zoneName)
+			-- Show zones that match the item's category.
+			if zoneInfo and zoneInfo.Category == itemCategory then
+				zonePart.Color = zoneInfo.Color
+				local targetTransparency = visible and 0.7 or 1
+				TweenService:Create(zonePart, TweenInfo.new(0.3), { Transparency = targetTransparency }):Play()
+			end
+		end
 	end
+end
 
-	placementMode = mode
-	currentRotation = CFrame.new()
+-- Cleans up the current placement state.
+local function cancelPlacement()
+	if not currentGhostModel then return end
+	
+	if currentItemInfo then
+		setZoneVisibility(currentItemInfo.Category, false)
+	end
+	
+	currentGhostModel:Destroy()
+	currentGhostModel = nil
+	isPlacing = false
+	currentItemInfo = nil
+	hideValidationMessage()
+end
 
-	local templateModel = (mode == "Module") and habitatModules:FindFirstChild(name)
-		or interiorItems:FindFirstChild(name)
 
+--============================================================================--
+--// CORE PLACEMENT LOGIC
+--============================================================================--
+
+-- Creates the ghost model and initializes the placement process.
+local function createGhostModel(name, isModule)
+	print("YYYYYYYYYYY")
+	cancelPlacement() -- Clean up any previous state first
+
+	local templateModel = isModule and habitatModules:FindFirstChild(name) or interiorItems:FindFirstChild(name)
 	if not templateModel then return end
 
-	currentGhostModel = templateModel:Clone()
-	isPlacing = true
-
-	-- Reset volume control state for the new item
-	isVolumeChangingEnabled = false
-	originalPartSizes = {}
-	baseVolume = 0
-	currentScale = 1
-	
-	local hasVolumeData = false
-	if placementMode == "Item" then
-		baseVolume = NHVData.GetVolume(name) or 0
-		if baseVolume > 0 then
-			hasVolumeData = true
+	if not isModule then
+		currentItemInfo = ItemData.Get(name)
+		if not currentItemInfo then
+			warn("No ItemData found for: " .. name)
+			return
 		end
 	end
 
-	for _, descendant in ipairs(currentGhostModel:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			descendant.Transparency = 0.7
-			descendant.CanCollide = false
-			descendant.Anchored = true
-			if hasVolumeData then
-				originalPartSizes[descendant] = descendant.Size -- Store original size for scaling
+	-- Initialize state variables
+	currentGhostModel = templateModel:Clone()
+	isPlacing = true
+	currentRotation = CFrame.new()
+	isVolumeChangingEnabled = false
+	currentScale = 1
+	originalPartSizes = {}
+	
+	-- Setup parts and store their original sizes for scaling calculations
+	for _, part in ipairs(currentGhostModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Transparency = 0.6
+			part.CanCollide = false
+			part.Anchored = true
+			if not isModule then
+				originalPartSizes[part] = part.Size
 			end
 		end
 	end
 
-	-- Create and setup the Billboard GUI if the item has volume data
-	if hasVolumeData and currentGhostModel.PrimaryPart then
-		local billboardGui = Instance.new("BillboardGui")
-		billboardGui.Name = "VolumeDisplay"
-		billboardGui.Adornee = currentGhostModel.PrimaryPart
-		billboardGui.Size = UDim2.new(6, 0, 1.5, 0)
-		billboardGui.StudsOffset = Vector3.new(0, 3, 0)
-		billboardGui.AlwaysOnTop = true
-
-		local textLabel = Instance.new("TextLabel")
-		textLabel.Name = "VolumeLabel"
-		textLabel.Size = UDim2.new(1, 0, 1, 0)
-		textLabel.BackgroundTransparency = 1
-		textLabel.TextColor3 = Color3.new(1, 1, 1)
-		textLabel.TextScaled = true
-		textLabel.Font = Enum.Font.SourceSansBold
-		textLabel.TextStrokeTransparency = 0.5
-		textLabel.Parent = billboardGui
-
-		billboardGui.Parent = currentGhostModel.PrimaryPart
-		updateGhostVolume() -- Set initial text on the GUI
-	end
-
 	currentGhostModel.Parent = workspace
+	
+	-- Make the appropriate zones visible to the player
+	if not isModule then
+		setZoneVisibility(currentItemInfo.Category, true)
+	end
 end
 
---// NEW: Updates the size and UI of the ghost model based on currentScale
-function updateGhostVolume()
-	if not currentGhostModel or baseVolume == 0 then return end
+-- Updates the size of the ghost model and its volume display based on the current scale.
+local function updateGhostVolume()
+	if not (currentGhostModel and currentItemInfo) then return end
 
 	-- Resize all parts of the model proportionally
 	for part, originalSize in pairs(originalPartSizes) do
@@ -126,27 +185,19 @@ function updateGhostVolume()
 			part.Size = originalSize * currentScale
 		end
 	end
-	
-	-- Update the Billboard GUI text
-	local primaryPart = currentGhostModel.PrimaryPart
-	if primaryPart then
-		local billboardGui = primaryPart:FindFirstChild("VolumeDisplay")
-		if billboardGui then
-			local textLabel = billboardGui:FindFirstChild("VolumeLabel")
-			local displayedVolume = baseVolume * (currentScale^3)
-			local modeText = isVolumeChangingEnabled and " (Scaling ON)" or ""
-			textLabel.Text = string.format("Volume: %.2f m³%s", displayedVolume, modeText)
-		end
-	end
 end
 
+--============================================================================--
+--// RUNSERVICE & USERINPUTSERVICE HANDLERS
+--============================================================================--
+
+-- This function runs every frame to update the ghost model's position and validate it.
 local function onRenderStep()
-	if not (isPlacing and currentGhostModel and currentGhostModel.PrimaryPart) then
-		return
-	end
+	if not (isPlacing and currentGhostModel and currentGhostModel.PrimaryPart) then return end
 
 	local primaryPart = currentGhostModel.PrimaryPart
-
+	
+	-- 1. Raycast from the mouse to find the surface below it
 	local mouseLocation = UserInputService:GetMouseLocation()
 	local unitRay = workspace.CurrentCamera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
 	local raycastParams = RaycastParams.new()
@@ -154,85 +205,119 @@ local function onRenderStep()
 	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 	local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
 
-	if raycastResult then
-		local normal = raycastResult.Normal
-		local position = raycastResult.Position
-		
-		-- Base orientation depends on placement mode
-		local orientation = CFrame.new()
-		if placementMode == "Module" then
-			orientation = currentRotation
-		else -- "Item"
-			orientation = CFrame.lookAt(Vector3.new(), normal) * currentRotation
+	if not raycastResult then
+		hideValidationMessage()
+		return -- Hide ghost if not pointing at anything
+	end
+	
+	-- 2. Calculate the correct CFrame to sit flush on the surface
+	local normal = raycastResult.Normal
+	local position = raycastResult.Position
+	local orientation = CFrame.lookAt(Vector3.new(), normal) * currentRotation
+	
+	local partSize = primaryPart.Size -- Use the CURRENT, scaled size
+	local cframe_noPos = primaryPart.CFrame - primaryPart.CFrame.Position
+	
+	local rightVec = cframe_noPos.RightVector
+	local upVec = cframe_noPos.UpVector
+	local lookVec = cframe_noPos.LookVector
+
+	local totalOffset = math.abs(rightVec:Dot(normal) * partSize.X / 2)
+		+ math.abs(upVec:Dot(normal) * partSize.Y / 2)
+		+ math.abs(lookVec:Dot(normal) * partSize.Z / 2)
+	
+	local correctedCFrame = CFrame.new(position + normal * totalOffset) * (orientation - orientation.Position)
+	currentGhostModel:SetPrimaryPartCFrame(correctedCFrame)
+	
+	-- 3. Perform real-time validation if placing an item
+	if currentItemInfo then
+		local touchingParts = workspace:GetPartsInPart(primaryPart)
+		local currentZonePart = nil
+		for _, part in ipairs(touchingParts) do
+			if part.Parent == PLACEMENT_ZONES_FOLDER then
+				currentZonePart = part
+				break
+			end
 		end
 
-		-- Calculate the offset needed to place the model flush on the surface
-		local partSize = primaryPart.Size -- Use the CURRENT, scaled size
-		local cframe_noPos = primaryPart.CFrame - primaryPart.CFrame.Position
+		if not currentZonePart then
+			showValidationMessage("❌ Place item inside a designated colored zone.", false)
+			return
+		end
 		
-		local rightVec = cframe_noPos.RightVector
-		local upVec = cframe_noPos.UpVector
-		local lookVec = cframe_noPos.LookVector
+		local zoneName = currentZonePart.Name
+		local zoneInfo = ZoneData.Get(zoneName)
 
-		local totalOffset = math.abs(rightVec:Dot(normal) * partSize.X / 2)
-			+ math.abs(upVec:Dot(normal) * partSize.Y / 2)
-			+ math.abs(lookVec:Dot(normal) * partSize.Z / 2)
+		if not zoneInfo or zoneInfo.Category ~= currentItemInfo.Category then
+			showValidationMessage("❌ This item does not belong in the " .. (zoneInfo and zoneInfo.FriendlyName or "zone") .. ".", false)
+			return
+		end
+		
+		local ghostVolume = currentItemInfo.BaseVolume * (currentScale ^ 3)
+		if clientZoneVolumes[zoneName] + ghostVolume > zoneInfo.MaxVolume + 0.01 then
+			showValidationMessage("❌ " .. zoneInfo.FriendlyName .. " Volume Insufficient.", false)
+			return
+		end
 
-		-- Apply the final CFrame
-		local correctedCFrame = CFrame.new(position + normal * totalOffset) * (orientation - orientation.Position)
-		currentGhostModel:SetPrimaryPartCFrame(correctedCFrame)
+		showValidationMessage("✅ NASA Compliant!", true)
 	end
 end
 
+-- This function handles all key presses and mouse clicks.
 local function onInputBegan(input, gameProcessedEvent)
 	if gameProcessedEvent or not isPlacing then return end
 
-	-- Place Item (Left Click)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		local modelName = currentGhostModel.Name
-		local modelCFrame = currentGhostModel.PrimaryPart.CFrame
-		if placementMode == "Module" then
-			placeModuleEvent:FireServer(modelName, modelCFrame)
-		else
-			--// MODIFIED: Send the final size of the primary part to the server
-			local finalSize = currentGhostModel.PrimaryPart.Size
-			placeItemEvent:FireServer(modelName, modelCFrame, finalSize)
-		end
-		currentGhostModel:Destroy()
-		currentGhostModel = nil
-		isPlacing = false
-	end
-
-	-- Cancel Placement (Right Click)
+	-- Cancel Placement
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
-		currentGhostModel:Destroy()
-		currentGhostModel = nil
-		isPlacing = false
+		cancelPlacement()
 	end
 
-	-- Rotate (R key)
+	-- Place Item/Module
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		print("ZZZZZZZZZZZZZz")
+		if currentItemInfo then -- Placing an interior item
+			-- Final validation check before sending to server
+			local ghostPart = currentGhostModel.PrimaryPart
+			local touchingParts = workspace:GetPartsInPart(ghostPart)
+			local targetZonePart = nil
+			for _, part in ipairs(touchingParts) do if part.Parent == PLACEMENT_ZONES_FOLDER then targetZonePart = part; break end end
+			
+			if not targetZonePart then return end
+			local zoneName = targetZonePart.Name
+			local zoneInfo = ZoneData.Get(zoneName)
+			if not zoneInfo or zoneInfo.Category ~= currentItemInfo.Category then return end
+			local ghostVolume = currentItemInfo.BaseVolume * (currentScale ^ 3)
+			if clientZoneVolumes[zoneName] + ghostVolume > zoneInfo.MaxVolume + 0.01 then return end
+			
+			-- All checks passed. Update client state and fire to server.
+			clientZoneVolumes[zoneName] += ghostVolume
+			placeItemEvent:FireServer(currentGhostModel.Name, ghostPart.CFrame, ghostPart.Size, zoneName)
+			
+			-- Seamlessly start placing another of the same item
+			createGhostModel(currentGhostModel.Name, false) 
+
+		else -- Placing a module
+			placeModuleEvent:FireServer(currentGhostModel.Name, currentGhostModel.PrimaryPart.CFrame)
+			cancelPlacement()
+		end
+	end
+
+	-- Rotate
 	if input.KeyCode == Enum.KeyCode.R then
-		-- Rotate around the Y-axis, which is more intuitive for placing items
 		currentRotation = currentRotation * CFrame.Angles(0, math.rad(45), 0)
 	end
 	
-	--// NEW: Volume Control Input Logic
-	if placementMode == "Item" and baseVolume > 0 then
-		-- Toggle Volume Changing Mode (V key)
+	-- Volume Controls (only for items with volume data)
+	if currentItemInfo and currentItemInfo.BaseVolume > 0 then
 		if input.KeyCode == Enum.KeyCode.V then
 			isVolumeChangingEnabled = not isVolumeChangingEnabled
-			updateGhostVolume() -- Update GUI text to show mode change
 		end
 		
-		-- Only allow scaling if the mode is enabled
 		if isVolumeChangingEnabled then
-			-- Increase Volume (= key)
 			if input.KeyCode == Enum.KeyCode.Equals then
 				currentScale = currentScale + VOLUME_CHANGE_STEP
 				updateGhostVolume()
 			end
-			
-			-- Decrease Volume (- key)
 			if input.KeyCode == Enum.KeyCode.Minus then
 				currentScale = math.max(MIN_SCALE, currentScale - VOLUME_CHANGE_STEP)
 				updateGhostVolume()
@@ -241,18 +326,61 @@ local function onInputBegan(input, gameProcessedEvent)
 	end
 end
 
+--============================================================================--
 --// CONNECTIONS
-cylinderButton.MouseButton1Click:Connect(function() createGhostModel("Cylinder", "Module") end)
-domeButton.MouseButton1Click:Connect(function() createGhostModel("Dome", "Module") end)
+--============================================================================--
+
+-- IMPORTANT: You must connect your UI buttons to the createGhostModel function.
+-- Example (assuming you have a reference to your UI buttons):
+local GuiController = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiController"))
+local mainGui = GuiController.Guis.HUDGui
+local mainHolder = mainGui:WaitForChild("Left"):WaitForChild("Holder")
+local interiorItemsFrame = mainHolder:WaitForChild("ScrollingFrame")
+
+print("Setting up UI button connections...")
+
+--// Connect Habitat Module Buttons
+-- These are the large, structural components. The second argument to createGhostModel is 'true'.
+
+local cylinderButton = mainHolder:FindFirstChild("Cylinder")
+if cylinderButton then
+	cylinderButton.MouseButton1Click:Connect(function() 
+		createGhostModel("Cylinder", true) 
+	end)
+else
+	warn("UI Button 'Cylinder' not found in mainHolder.")
+end
+
+local domeButton = mainHolder:FindFirstChild("Dome")
+if domeButton then
+	domeButton.MouseButton1Click:Connect(function() 
+		createGhostModel("Dome", true) 
+	end)
+else
+	warn("UI Button 'Dome' not found in mainHolder.")
+end
+
+
+--// Connect Interior Item Buttons
+-- This loop connects all buttons inside the ScrollingFrame for interior items.
+-- The second argument to createGhostModel is 'false'.
 
 for _, button in ipairs(interiorItemsFrame:GetChildren()) do
+	-- Ensure we only connect valid button types
 	if button:IsA("ImageButton") or button:IsA("TextButton") then
+		local itemName = button.Name
+		
+		-- The button's name MUST match the model name in ReplicatedStorage/InteriorItems
+		-- and the key name in the ItemData module.
 		button.MouseButton1Click:Connect(function()
-			-- Assumes button.Name matches an item name in InteriorItems and NHVData
-			createGhostModel(button.Name, "Item")
+			print("UI Request to place item: " .. itemName)
+			createGhostModel(itemName, false)
 		end)
 	end
 end
 
+-- Connect the core event handlers
 UserInputService.InputBegan:Connect(onInputBegan)
-RunService.RenderStepped:Connect(onRenderStep)```
+RunService.RenderStepped:Connect(onRenderStep)
+
+print("HabitatPlacementClient Initialized.")
