@@ -1,4 +1,6 @@
-# GAME
+# SPACEHAB Studio
+Software / Platform: Roblox, Roblox Studio
+Tools: Lua, Rojo, VSCode
 AI Used for most of the Scripting: Gemini 2.5 Pro
 <br>
 Synced by [Rojo](https://github.com/rojo-rbx/rojo) 7.5.1.
