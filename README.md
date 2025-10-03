@@ -1,12 +1,12 @@
-# 🌌 Mars Voyages: Habitat Designer
+# 🌌 SpaceHab Studio
 
 **Democratizing space design — from classrooms to NASA labs.**
 
 ---
 
-## 🎮 What is Mars Voyages: Habitat Designer?
+## 🎮 What is SpaceHab Studio?
 
-*Mars Voyages: Habitat Designer* is an **interactive simulation game** that transforms NASA’s complex **NHV (Net Habitable Volume) data** and habitat regulations into a hands-on, drag-and-drop design experience.
+*SpaceHab Studio* is an **interactive simulation game** that transforms NASA’s complex **NHV (Net Habitable Volume) data** and habitat regulations into a hands-on, drag-and-drop design experience.
 
 Players, students, and engineers can experiment with **crew layouts, essential habitat modules, and zoning rules** — while receiving **real-time validation** against NASA’s official Table 16 standards.
 
@@ -33,7 +33,7 @@ This isn’t just a game. It’s:
 
 Designing a habitat for Mars is **more than engineering** — it’s about ensuring human survival on a 7-month journey and beyond. NASA defines **18 essential habitat areas**, each with strict requirements. Misplacing even one system could mean **mission failure**.
 
-*Mars Voyages: Habitat Designer* makes these challenges **accessible, visual, and fun**, empowering anyone to contribute ideas for humanity’s next leap.
+*SpaceHab Studio* makes these challenges **accessible, visual, and fun**, empowering anyone to contribute ideas for humanity’s next leap.
 
 ---
 
@@ -58,8 +58,8 @@ Designing a habitat for Mars is **more than engineering** — it’s about ensur
 ### Clone the repo
 
 ```bash
-git clone https://github.com/yourusername/mars-voyages-habitat-designer.git
-cd mars-voyages-habitat-designer
+git clone https://github.com/adib4u/SPACEHAB-Studio.git
+cd SPACEHAB-Studio
 ```
 
 ### Install Requirements
