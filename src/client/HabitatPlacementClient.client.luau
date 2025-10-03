@@ -1,12 +1,15 @@
-task.wait(3)
-
 --[[
 	LocalScript: HabitatPlacementClient
-	Version: Final + STRICT VALIDATION + Deletion/Highlighting
+	Version: Final + Robust Multi-Axis Rotation
 	Author: Gemini
 	Location: StarterPlayer > StarterPlayerScripts
-]]
 
+	Description: 
+	Handles all client-side logic. Includes a robust rotation system allowing the player
+	to toggle between X (Red), Y (Green), and Z (Blue) rotation axes using the 'T' key.
+	The 'R' key rotates on the currently selected axis.
+]]
+task.wait(3)
 --// SERVICES
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -43,7 +46,6 @@ local interiorItemsFrame = mainHolder and mainHolder:WaitForChild("ScrollingFram
 --// UI SETUP
 local validationGui = Instance.new("ScreenGui"); validationGui.Name = "ValidationGui"; validationGui.ResetOnSpawn = false
 validationGui.ZIndexBehavior = Enum.ZIndexBehavior.Global; validationGui.DisplayOrder = 100; validationGui.Parent = playerGui
-
 local validationLabel = Instance.new("TextLabel"); validationLabel.Name = "ValidationLabel"; validationLabel.Size = UDim2.new(0, 500, 0, 100)
 validationLabel.AnchorPoint = Vector2.new(0.5, 1); validationLabel.Position = UDim2.new(0.5, 0, 0.75, 0)
 validationLabel.BackgroundTransparency = 0.4; validationLabel.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
@@ -51,7 +53,7 @@ validationLabel.TextColor3 = Color3.new(1, 1, 1); validationLabel.Font = Enum.Fo
 validationLabel.TextScaled = true; validationLabel.TextStrokeTransparency = 0; validationLabel.Visible = false
 validationLabel.Parent = validationGui
 
-local nhvStatusLabel = Instance.new("TextLabel"); nhvStatusLabel.Name = "NHVStatusLabel"; nhvStatusLabel.Size = UDim2.new(0, 300, 0, 40)
+local nhvStatusLabel = Instance.new("TextLabel"); nhvStatusLabel.Name = "NHVStatusLabel"; nhvStatusLabel.Size = UDim2.new(0, 350, 0, 40)
 nhvStatusLabel.AnchorPoint = Vector2.new(0.5, 0); nhvStatusLabel.Position = UDim2.new(0.5, 0, 0.02, 0)
 nhvStatusLabel.BackgroundTransparency = 0.2; nhvStatusLabel.Font = Enum.Font.SourceSansSemibold
 nhvStatusLabel.TextScaled = true; nhvStatusLabel.Visible = false; nhvStatusLabel.Parent = mainGui
@@ -68,6 +70,7 @@ local originalPartSizes, currentScale = {}, 1
 local VOLUME_CHANGE_STEP, MIN_SCALE = 0.05, 0.1
 local zoneParts, clientZoneVolumes, viewportModelsToRotate = {}, {}, {}
 local isInDeleteMode, currentHoverToDeleteItem = false, nil
+local currentRotationAxis = "Y" -- Start with Y-axis rotation
 
 for zoneName, _ in pairs(ZoneData.Properties) do
 	clientZoneVolumes[zoneName] = 0
@@ -110,11 +113,16 @@ local function populateItemViewports()
 	end
 end
 
+--============================================================================--
+--// HELPER FUNCTIONS
+--============================================================================--
 local function showValidationMessage(message, isSuccess)
 	validationLabel.Text = message
 	validationLabel.TextColor3 = isSuccess and Color3.fromRGB(85, 255, 127) or Color3.fromRGB(255, 85, 85)
 	validationLabel.Visible = true
 end
+
+local function hideValidationMessage() validationLabel.Visible = false end
 
 local function setZoneVisibility(visible)
 	for _, zonePart in pairs(zoneParts) do
@@ -123,17 +131,32 @@ local function setZoneVisibility(visible)
 	end
 end
 
+-- NEW: Sets ghost color based on the selected rotation axis
+local function updateGhostColor()
+	if not currentGhostModel then return end
+	local color = Color3.fromRGB(0, 200, 0) -- Default Green for Y
+	if currentRotationAxis == "X" then
+		color = Color3.fromRGB(200, 0, 0) -- Red
+	elseif currentRotationAxis == "Z" then
+		color = Color3.fromRGB(0, 100, 200) -- Blue
+	end
+	for _, part in ipairs(currentGhostModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Color = color
+		end
+	end
+end
+
+-- MODIFIED: Includes the current rotation axis in the HUD
 local function updateStatusLabel()
 	if isPlacing and currentItemInfo then
-		nhvStatusLabel.Text = "(Placing Item) NHV Tracking On"
+		nhvStatusLabel.Text = string.format("Placing.. NHV Tracking ON (Rotation Axis: %s)", currentRotationAxis)
 		nhvStatusLabel.BackgroundColor3 = Color3.fromRGB(255, 126, 0); nhvStatusLabel.Visible = true
 	elseif isInDeleteMode then
 		nhvStatusLabel.Text = "Delete Mode (Click to delete, X to exit)"
 		nhvStatusLabel.BackgroundColor3 = Color3.fromRGB(200, 0, 0); nhvStatusLabel.Visible = true
 	else nhvStatusLabel.Visible = false end
 end
-
-local function hideValidationMessage() validationLabel.Visible = false end
 
 local function cancelAllModes()
 	if currentGhostModel then currentGhostModel:Destroy() end
@@ -155,7 +178,7 @@ local function updateGhostVolume()
 		if textLabel then
 			local friendlyName = currentItemInfo.FriendlyName or currentGhostModel.Name
 			local displayedVolume = currentItemInfo.BaseVolume * (currentScale ^ 3)
-			local modeText = isVolumeChangingEnabled and " <br/><font color='#ffff00'>[Adjusting Volume]</font>" or ""
+			local modeText = isVolumeChangingEnabled and " <br/><font color='#ffff00'>[Adjusting Scale]</font>" or ""
 			textLabel.Text = string.format("<b>%s</b>%s\nVolume: %.2f m³", friendlyName, modeText, displayedVolume)
 		end
 	end
@@ -171,12 +194,15 @@ local function createGhostModel(name, isModule)
 	end
 	currentGhostModel = template:Clone()
 	isPlacing = true; currentRotation = CFrame.new(); currentScale = 1; originalPartSizes = {}
+	currentRotationAxis = "Y" -- Reset to Y-axis on new placement
+	
 	for _, part in ipairs(currentGhostModel:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.Transparency = 0.5; part.CanCollide = false; part.Anchored = true
 			if not isModule then originalPartSizes[part] = part.Size end
 		end
 	end
+	
 	if currentItemInfo and currentGhostModel.PrimaryPart then
 		local gui = Instance.new("BillboardGui"); gui.Name = "VolumeDisplay"; gui.Adornee = currentGhostModel.PrimaryPart
 		gui.Size = UDim2.new(8, 0, 3, 0); gui.StudsOffset = Vector3.new(0, 3.5, 0); gui.AlwaysOnTop = true
@@ -185,8 +211,15 @@ local function createGhostModel(name, isModule)
 		label.Font = Enum.Font.SourceSansBold; label.TextStrokeTransparency = 0.5; label.RichText = true
 		label.Parent = gui; gui.Parent = currentGhostModel.PrimaryPart
 	end
+	
 	currentGhostModel.Parent = workspace
-	if not isModule then setZoneVisibility(true); updateStatusLabel(); updateGhostVolume() end
+	
+	if not isModule then
+		setZoneVisibility(true); 
+		updateGhostColor() -- Set initial color
+		updateStatusLabel(); 
+		updateGhostVolume()
+	end
 end
 
 --============================================================================--
@@ -214,7 +247,9 @@ local function onRenderStep(deltaTime)
 	end
 
 	if isPlacing and currentGhostModel and currentGhostModel.PrimaryPart then
-		local rayParams = RaycastParams.new(); rayParams.FilterDescendantsInstances = {currentGhostModel, localPlayer.Character}; rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+		local rayParams = RaycastParams.new()
+rayParams.FilterDescendantsInstances = {currentGhostModel, localPlayer.Character, PLACEMENT_ZONES_FOLDER}
+rayParams.FilterType = Enum.RaycastFilterType.Blacklist
 		local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, rayParams)
 		if not result then
 			if currentGhostModel.Parent then currentGhostModel.Parent = nil end
@@ -237,11 +272,9 @@ local function onRenderStep(deltaTime)
 				if zInfo.Category ~= currentItemInfo.Category then
 					showValidationMessage("❌ Wrong Zone. Needs: " .. currentItemInfo.Category, false)
 				else
-					-- CRITICAL FIX: Add a check for the scale
 					if math.abs(currentScale - 1) > 0.001 then
-						showValidationMessage("❌ Item must be at standard Volume to place.", false)
+						showValidationMessage("❌ Item must be at standard size to place.", false)
 					else
-						-- Only check volume if scale is correct
 						local standardVolume = currentItemInfo.BaseVolume
 						if clientZoneVolumes[zName] + standardVolume > zInfo.MaxVolume + 0.001 then
 							showValidationMessage(string.format("❌ Zone Full! (%.2f + %.2f > %.2f)", clientZoneVolumes[zName], standardVolume, zInfo.MaxVolume), false)
@@ -263,6 +296,8 @@ local function onInputBegan(input, gameProcessedEvent)
 		return
 	end
 
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then cancelAllModes() end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		if isInDeleteMode and currentHoverToDeleteItem then
 			local item = currentHoverToDeleteItem
@@ -282,20 +317,15 @@ local function onInputBegan(input, gameProcessedEvent)
 
 		if isPlacing then
 			if currentItemInfo then
-				-- CRITICAL FIX: Run the full validation logic again on click
-				if math.abs(currentScale - 1) > 0.001 then return end -- Fail if not standard size
-				
+				if math.abs(currentScale - 1) > 0.001 then return end
 				local pp = currentGhostModel.PrimaryPart; local parts = workspace:GetPartsInPart(pp); local zone = nil
 				for _, p in ipairs(parts) do if p.Parent == PLACEMENT_ZONES_FOLDER then zone = p; break end end
 				if not zone then return end
-				
 				local zName = zone.Name; local zInfo = ZoneData.Get(zName)
 				if zInfo.Category ~= currentItemInfo.Category then return end
-				
 				local standardVolume = currentItemInfo.BaseVolume
 				if clientZoneVolumes[zName] + standardVolume <= zInfo.MaxVolume + 0.001 then
 					clientZoneVolumes[zName] += standardVolume
-					-- Send original size, not scaled size
 					placeItemEvent:FireServer(currentGhostModel.Name, pp.CFrame, originalPartSizes[pp], zName)
 					createGhostModel(currentGhostModel.Name, false)
 				end
@@ -306,10 +336,33 @@ local function onInputBegan(input, gameProcessedEvent)
 		end
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton2 then cancelAllModes() end
-
 	if isPlacing and currentItemInfo then
-		if input.KeyCode == Enum.KeyCode.R then currentRotation *= CFrame.Angles(0, math.rad(45), 0) end
+		-- MODIFIED: 'R' key now rotates on the selected axis
+		if input.KeyCode == Enum.KeyCode.R then
+			local rotationAmount = CFrame.new()
+			if currentRotationAxis == "X" then
+				rotationAmount = CFrame.Angles(math.rad(45), 0, 0)
+			elseif currentRotationAxis == "Y" then
+				rotationAmount = CFrame.Angles(0, math.rad(45), 0)
+			elseif currentRotationAxis == "Z" then
+				rotationAmount = CFrame.Angles(0, 0, math.rad(45))
+			end
+			currentRotation = currentRotation * rotationAmount
+		end
+
+		-- NEW: 'T' key toggles the rotation axis
+		if input.KeyCode == Enum.KeyCode.T then
+			if currentRotationAxis == "Y" then
+				currentRotationAxis = "Z"
+			elseif currentRotationAxis == "Z" then
+				currentRotationAxis = "X"
+			else -- if it's "X"
+				currentRotationAxis = "Y"
+			end
+			updateGhostColor()
+			updateStatusLabel()
+		end
+
 		if currentItemInfo.BaseVolume > 0 then
 			if input.KeyCode == Enum.KeyCode.V then isVolumeChangingEnabled = not isVolumeChangingEnabled; updateGhostVolume() end
 			if isVolumeChangingEnabled then
