@@ -88,6 +88,7 @@ Then, **launch the game and start building your Space habitat!** 🚀
 
 ## 🪐 Credits & Inspiration
 Team: Crimson Navigators
+<br>
 Built for **#NASASpaceApps**, inspired by NASA’s open research on **Habitat Design & NHV**.
 
 **Mars Voyages: Your Home in Space Begins Here.** 🌌
