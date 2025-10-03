@@ -29,6 +29,7 @@ Shared.BillboardGuis = {
 
 Shared.Guis = {
 	HUDGui = PlayerGui:WaitForChild("HUDGui"),
+	CrewGui = PlayerGui:WaitForChild("CrewGui"),
 }
 
 local SetupGuiButtons = {} -- to exclude them from basic button effects (as they already have their own defined effect in SetupGui function)

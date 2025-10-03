@@ -19,6 +19,9 @@ Deck1Button.Visible = false
 Deck2Button.Visible = false
 Deck3Button.Visible = false
 
+local CrewGui = GuiController.Guis.CrewGui
+local CrewSize4Button = CrewGui:WaitForChild("Frame"):WaitForChild("Crew4")
+
 local DecksFolder = ReplicatedStorage:WaitForChild("Decks")
 
 local CurrentCam = Workspace.CurrentCamera
@@ -79,4 +82,8 @@ end)
 gotoDeck3.MouseButton1Click:Connect(function()
     local character = Player.Character or Player.CharacterAdded:Wait()
     character.PrimaryPart.CFrame = Workspace:WaitForChild("Deck3"):WaitForChild("GOTO").CFrame
+end)
+
+CrewSize4Button.MouseButton1Click:Connect(function()
+    CrewGui.Enabled = false
 end)
