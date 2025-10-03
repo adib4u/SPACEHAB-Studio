@@ -64,8 +64,8 @@ Designing a habitat for Mars is **more than engineering** — it’s about ensur
 ### Clone the repo
 
 ```bash
-git clone https://github.com/adib4u/SPACEHAB-Studio.git
-cd SPACEHAB-Studio
+git clone https://github.com/adib4u/SpaceHab-Studio.git
+cd SpaceHab-Studio
 ```
 
 ### Install Requirements
