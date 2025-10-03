@@ -27,6 +27,12 @@ This isn’t just a game. It’s:
 * 🏗 **Multi-Deck Habitats** – stack modules into immersive 3-deck environments
 * 📊 **Zoning Compliance Automation** – prevents critical placement mistakes (like treadmills next to bunks)
 
+![Habitat Interface](images/screenshot0.png)  
+![Habitat Interface](images/screenshot1.png)  
+![Drag-and-Drop Demo](images/screenshot2.png)  
+![NHV Tracking Example](images/screenshot3.png)  
+![Multi-Deck Layout](images/screenshot4.png)  
+![Multi-Deck Layout](images/screenshot5.png)  
 ---
 
 ## 🌍 Why It Matters
@@ -81,7 +87,7 @@ Then, **launch the game and start building your Space habitat!** 🚀
 ---
 
 ## 🪐 Credits & Inspiration
-
+Team: Crimson Navigators
 Built for **#NASASpaceApps**, inspired by NASA’s open research on **Habitat Design & NHV**.
 
 **Mars Voyages: Your Home in Space Begins Here.** 🌌
