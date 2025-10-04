@@ -21,6 +21,7 @@ Deck3Button.Visible = false
 
 local CrewGui = GuiController.Guis.CrewGui
 local CrewSize4Button = CrewGui:WaitForChild("Frame"):WaitForChild("Crew4")
+local CrewSize6Button = CrewGui:WaitForChild("Frame"):WaitForChild("Crew6")
 
 local DecksFolder = ReplicatedStorage:WaitForChild("Decks")
 
@@ -85,5 +86,8 @@ gotoDeck3.MouseButton1Click:Connect(function()
 end)
 
 CrewSize4Button.MouseButton1Click:Connect(function()
+    CrewGui.Enabled = false
+end)
+CrewSize6Button.MouseButton1Click:Connect(function()
     CrewGui.Enabled = false
 end)
